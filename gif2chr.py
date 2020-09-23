@@ -3,120 +3,18 @@ import os
 import array as arr 
 import sys
 
+
 ##########################################################################################################################
 # globals .. oh boy 
 block_width = 32
 block_height = 32
 bytes_written = 0
 output_header_file = 0
-output_rom_file = 0
 block_index = 0
 sprite_index = 0
-##########################################################################################################################
-# C64 sprite export 
-# as 3 planes 24x21 pixels 
 
-class C64SpriteEncoder():
-	def __init__(self):
-		self.charwidth = 24
-		self.charheight = 21
-		self.padsize = 2048
-		self.defineMeta = False
-		self.fileperframe = False
-		self.ext = ".c64"
-	
-	def encodeblock(self,input,px,py,ex):
-		global bytes_written,output_rom_file
-		bitsets=[0] * 3
-		bitsets[0]=[0] * 64
-		bitsets[1]=[0] * 64
-		bitsets[2]=[0] * 64
-		
-		(w, h) = input.size
-		# for each pixel Y
-		for iy in range(0,self.charheight):
-			# reset the byte
-			bitsa = 0
-			bitsb = 0
-			# for each pixel X
-			for ix in range(0,self.charwidth):
-				tx = (ix // 8) + (iy*3) 
-				fx = 7-(ix&7)
-
-				# flip the index 
-				# get the color ( we assume 4 color gif )
-				pixel = 0 
-				if px+ix<w and py+iy<h and px+ix<ex: 
-					pixel = input.getpixel((px+ix,py+iy))
-				pixel=pixel&3
-				if pixel!=0:
-					bitsets[pixel-1][tx]|=1<<fx
-
-		# set fake colors and attributes 
-		# for sprpad 0x10 means the next sprite is overlayed 
-		# pink
-		bitsets[0][63]=0x1a
-		# red
-		bitsets[1][63]=0x12
-		# white
-		bitsets[2][63]=1
-		# write all 3 blocks
-		for iy in range(0,64):
-			output_rom_file.write(bitsets[0][iy].to_bytes(1,byteorder='big'))
-		for iy in range(0,64):
-			output_rom_file.write(bitsets[1][iy].to_bytes(1,byteorder='big'))
-		for iy in range(0,64):
-			output_rom_file.write(bitsets[2][iy].to_bytes(1,byteorder='big'))
-
-##########################################################################################################################
-# NES 8x8 sprites 
-# saves a header file for meta data 
-class NESEncoder():
-	def __init__(self):
-		self.charwidth = 8
-		self.charheight = 8
-		self.padsize = 4096
-		self.defineMeta = True
-		self.fileperframe = True
-		self.ext = ".chr"
-
-	def encodeblock(self,input,px,py,ex):
-		global bytes_written,output_rom_file
-		bitset0=[]
-		bitset1=[]
-		(w, h) = input.size
-
-		# for each pixel Y
-		for iy in range(0,8):
-			# reset the byte
-			bitsa = 0
-			bitsb = 0
-			# for each pixel X
-			for ix in range(0,8):
-				# flip the index 
-				fx = 7-ix
-				# get the color ( we assume 4 color gif )
-				pixel = 0 
-				if px+ix<w and py+iy<h and px+ix<ex: 
-					pixel = input.getpixel((px+ix,py+iy))
-				if pixel>=4:
-					palette=pixel//4
-				pixel=pixel&3
-				# set the bits 
-				if pixel&1==1:
-					bitsa|=1<<fx
-				if pixel&2==2:
-					bitsb|=1<<fx
-			# store the bytes per Y 
-			bitset0.append(bitsa)
-			bitset1.append(bitsb)
-			# save the set out as bytes
-				# nes stores bitplanes 8 bytes per plane * 2
-		for iy in range(0,8):
-			output_rom_file.write(bitset0[iy].to_bytes(1,byteorder='big'))
-		for iy in range(0,8):
-			output_rom_file.write(bitset1[iy].to_bytes(1,byteorder='big'))
-		bytes_written=bytes_written+16
+from NESEncoder import NESEncoder
+from C64Encoder import C64SpriteEncoder
 
 ##########################################################################################################################
 # encodes a block 
@@ -188,7 +86,7 @@ def encodeblockchars(input,x,y,frame,basename):
 					normal = normal + "\t" +str(xstart-16 + px) + "," + str(-24+ystart+ py) + "," +str(sprite_index)+ "," + str(palette[gridpos]) + ","
 					flipped = flipped + "\t" +str(block_width - (xstart-16 + px)) + "," + str(-24+ystart+ py) + "," +str(sprite_index)+ "," + str(0x40 | palette[gridpos]) + ","
 					sprite_index=sprite_index+1
-					Encoder.encodeblock(input,x+xstart+px,y+ystart+py,x+block_width)
+					bytes_written =bytes_written + Encoder.encodeblock(input,x+xstart+px,y+ystart+py,x+block_width)
 				else:
 					s = s + "."
 			# show debug occupancy
@@ -205,14 +103,14 @@ def encodeblockchars(input,x,y,frame,basename):
 # for each frame , encode the blocks
 
 def frame2tiles(input,basename,index):
-	global sprite_index,block_width,block_height,output_header_file,bytes_written,output_rom_file,block_index,Encoder
+	global sprite_index,block_width,block_height,output_header_file,bytes_written,block_index,Encoder
 
 	(w, h) = input.size
 	# if there's a file per frame 
 	# create it here 
 	if Encoder.fileperframe==True: 
 		outname = basename + "_" + str(index) + Encoder.ext
-		output_rom_file = open(outname, "wb")
+		Encoder.output_rom_file = open(outname, "wb")
 
 	# sprite index
 	sprite_index = 0
@@ -229,20 +127,20 @@ def frame2tiles(input,basename,index):
 	# pad the rom
 	while(bytes_written<Encoder.padsize):
 		pad = 0 
-		output_rom_file.write(pad.to_bytes(1,byteorder='big'))
+		Encoder.output_rom_file.write(pad.to_bytes(1,byteorder='big'))
 		bytes_written=bytes_written+1
 
 	# if file per frame 
 	# close it here 
 	if Encoder.fileperframe==True: 
-		output_rom_file.close()
+		Encoder.output_rom_file.close()
 
 ##########################################################################################################################
 # for each gif 
 # encode 
 
 def gif2nes(name,outname,bw,bh):
-	global sprite_index,block_width,block_height,output_header_file,block_index,output_rom_file,Encoder
+	global sprite_index,block_width,block_height,output_header_file,block_index,Encoder
 
 	block_width = bw 
 	block_height = bh
@@ -259,7 +157,7 @@ def gif2nes(name,outname,bw,bh):
 	# create that here 
 	if Encoder.fileperframe==False: 
 		outputname = name + Encoder.ext
-		output_rom_file = open(outputname, "wb")
+		Encoder.output_rom_file = open(outputname, "wb")
 
 	# now chop em
 	im = Image.open(newname)
@@ -294,7 +192,7 @@ def gif2nes(name,outname,bw,bh):
 	if Encoder.defineMeta==True:
 		output_header_file.close()
 	if Encoder.fileperframe==False: 
-		output_rom_file.close()
+		Encoder.output_rom_file.close()
 
 ##########################################################################################################################
 # the usual 
